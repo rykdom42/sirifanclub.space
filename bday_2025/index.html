@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>An Animation</title>
+<style>
+  *{
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  html,body{
+    height:100%;
+    margin:0;
+    background:#000;
+    overflow:hidden;
+    overscroll-behavior:none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  #wrap{
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    background:#000;
+  }
+  canvas{
+    width:1920px;
+    height:1080px;
+    transform-origin: center center;
+    background:transparent;
+    display:block;
+    cursor:pointer;
+    touch-action:none;
+  }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="cv" width="1920" height="1080"></canvas>
+</div>
+
+<script>
+/* ============================
+   CACHE BUSTING
+   - Burayı deploy güncellemesinde değiştir.
+   - Örn: "2026-01-02-1"
+============================ */
+const ASSET_VER = "2026-01-02-1";
+
+/* === SCALE === */
+function resizeCanvas(){
+  const wrap = document.getElementById("wrap");
+  const canvas = document.getElementById("cv");
+  const scale = Math.min(
+    wrap.clientWidth / 1920,
+    wrap.clientHeight / 1080
+  );
+  canvas.style.transform = `scale(${scale})`;
+}
+window.addEventListener("resize", resizeCanvas);
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", resizeCanvas);
+  window.visualViewport.addEventListener("scroll", resizeCanvas);
+}
+resizeCanvas();
+window.addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("dblclick", e => e.preventDefault());
+
+/* === SABİTLER (FPS) === */
+const W=1920, H=1080;
+
+const FPS_INTRO       = 3;
+const FPS_LOOP        = 9;
+const FPS_LOOP2       = 9;
+const FPS_FALL        = 12;
+const FPS_MOVE        = 7;
+const FPS_LOOP3       = 7;
+const FPS_LOOP4       = 6;
+const FPS_KICK        = 7;
+const FPS_CAKE        = 8;
+const FPS_WISH        = 5;
+const FPS_FINAL       = 10;
+const FPS_FINAL_LOOP  = 3;
+const FPS_FINAL_SCENE = 9;
+const FPS_OUTRO       = 3;
+
+const INTRO_TOTAL       = 2;
+const LOOP_TOTAL        = 48;
+const CLICK1_TOTAL      = 18;
+const CLICK2_TOTAL      = 17;
+const CLICK3_TOTAL      = 18;
+const JIGGLE_TOTAL      = 17;
+const FALL_TOTAL        = 88;
+const LOOP2_TOTAL       = 6;
+const MOVE_TOTAL        = 15;
+const LOOP3_TOTAL       = 7;
+const LOOP4_TOTAL       = 6;
+const KICK_TOTAL        = 110;
+const CAKE_TOTAL        = 136;
+const WISH_TOTAL        = 3;
+const FINAL_TOTAL       = 107;
+const FINAL_LOOP_TOTAL  = 2;
+const FINAL_SCENE_TOTAL = 73;
+const OUTRO_TOTAL       = 2;
+
+const PAD=5, EXT='png';
+
+/* === INTERAKTİF ALANLAR === */
+const INTRO_AREA = { type:'rect', x:714, y:188, w:456, h:262 };
+const AREA_LOOP  = { type:'oval', cx:925, cy:411, rx:65, ry:80 };
+const AREA_LOOP2 = { type:'oval', cx:981, cy:954, rx:31, ry:39 };
+const AREA_LOOP3 = { type:'oval', cx:1010, cy:950, rx:33, ry:40 };
+const AREA_LOOP4 = { type:'rect', x:658, y:839, w:62, h:112 };
+const WISH_AREA  = { type:'rect', x:749, y:278, w:457, h:166 };
+const FINAL_LOOP_AREA = { type:'oval', cx:978, cy:125, rx:64, ry:73 };
+
+/* OUTRO: restart */
+const OUTRO_AREA = { type:'rect', x:607, y:121, w:754, h:398 };
+
+/* OUTRO: MENÜYE DÖN */
+const OUTRO_MENU_AREA = {
+  type:'rect',
+  x: 1668.57,
+  y: 27.76,
+  w: 124.9,
+  h: 187.76
+};
+
+/* === CANVAS === */
+const canvas=document.getElementById('cv');
+const ctx=canvas.getContext('2d');
+
+let assetsReady  = false;
+
+/* === YARDIMCI === */
+function loadSeq(path,total){
+  return new Promise(resolve=>{
+    const imgs=new Array(total), ready=new Array(total).fill(false);
+    let loaded=0;
+
+    for(let i=1;i<=total;i++){
+      const img=new Image();
+      img.onload = ()=>{ ready[i-1]=true; if(++loaded===total) resolve({imgs,ready,total}); };
+      img.onerror= ()=>{ ready[i-1]=false; if(++loaded===total) resolve({imgs,ready,total}); };
+
+      const file = `${path}/frame_${String(i).padStart(PAD,'0')}.${EXT}`;
+      img.src = `${file}?v=${encodeURIComponent(ASSET_VER)}`;
+
+      imgs[i-1]=img;
+    }
+  });
+}
+
+function easeFps(i,total){
+  if (i < total * 0.25) return 16;
+  if (i < total * 0.70) return 12;
+  return 9;
+}
+
+function pointInOval(x,y,{cx,cy,rx,ry}){
+  const dx=(x-cx)/rx, dy=(y-cy)/ry;
+  return dx*dx+dy*dy<=1;
+}
+
+function pointInRect(x,y,{x:rx,y:ry,w,h}){
+  return x>=rx && x<=rx+w && y>=ry && y<=ry+h;
+}
+
+/* === TÜM SEKANSLARI YÜKLE === */
+let introSeq,loopSeq,c1Seq,c2Seq,c3Seq,jigSeq,fallSeq,loop2Seq,moveSeq,
+    loop3Seq,loop4Seq,kickSeq,cakeSeq,wishSeq,finalSeq,finalLoopSeq,finalSceneSeq,outroSeq;
+
+Promise.all([
+  loadSeq('frames/ball_intro',     INTRO_TOTAL),
+  loadSeq('frames/ball_loop',      LOOP_TOTAL),
+  loadSeq('frames/ball_click1',    CLICK1_TOTAL),
+  loadSeq('frames/ball_click2',    CLICK2_TOTAL),
+  loadSeq('frames/ball_click3',    CLICK3_TOTAL),
+  loadSeq('frames/ball_jiggle',    JIGGLE_TOTAL),
+  loadSeq('frames/ball_fall',      FALL_TOTAL),
+  loadSeq('frames/ball_loop2',     LOOP2_TOTAL),
+  loadSeq('frames/ball_move',      MOVE_TOTAL),
+  loadSeq('frames/ball_loop3',     LOOP3_TOTAL),
+  loadSeq('frames/ball_loop4',     LOOP4_TOTAL),
+  loadSeq('frames/ball_kick',      KICK_TOTAL),
+  loadSeq('frames/cake',           CAKE_TOTAL),
+  loadSeq('frames/wish_loop',      WISH_TOTAL),
+  loadSeq('frames/final',          FINAL_TOTAL),
+  loadSeq('frames/final_loop',     FINAL_LOOP_TOTAL),
+  loadSeq('frames/final_scene',    FINAL_SCENE_TOTAL),
+  loadSeq('frames/ball_outro',     OUTRO_TOTAL)
+]).then(([intro,loop,c1,c2,c3,jig,fall,loop2,move,loop3,loop4,kick,cake,wish,final,finalLoop,finalScene,outro])=>{
+  introSeq      = intro;
+  loopSeq       = loop;
+  c1Seq         = c1;
+  c2Seq         = c2;
+  c3Seq         = c3;
+  jigSeq        = jig;
+  fallSeq       = fall;
+  loop2Seq      = loop2;
+  moveSeq       = move;
+  loop3Seq      = loop3;
+  loop4Seq      = loop4;
+  kickSeq       = kick;
+  cakeSeq       = cake;
+  wishSeq       = wish;
+  finalSeq      = final;
+  finalLoopSeq  = finalLoop;
+  finalSceneSeq = finalScene;
+  outroSeq      = outro;
+
+  assetsReady   = true;
+  resetToIntro();
+  start();
+});
+
+/* === STATE === */
+let state='intro';
+let idx=0;
+let last=0, acc=0;
+
+const dtIntro      = 1000/FPS_INTRO;
+const dtLoop       = 1000/FPS_LOOP;
+const dtLoop2      = 1000/FPS_LOOP2;
+const dtFall       = 1000/FPS_FALL;
+const dtMove       = 1000/FPS_MOVE;
+const dtLoop3      = 1000/FPS_LOOP3;
+const dtLoop4      = 1000/FPS_LOOP4;
+const dtKick       = 1000/FPS_KICK;
+const dtCake       = 1000/FPS_CAKE;
+const dtWish       = 1000/FPS_WISH;
+const dtFinal      = 1000/FPS_FINAL;
+const dtFinalLoop  = 1000/FPS_FINAL_LOOP;
+const dtFinalScene = 1000/FPS_FINAL_SCENE;
+const dtOutro      = 1000/FPS_OUTRO;
+
+let nextClick   = 1;
+let inPostPhase = false;
+let jiggleCount = 0;
+let lastDrawn   = null;
+
+let wishUnlockTime   = 0;
+let wishWarningUntil = 0;
+
+let finalLoopUnlockTime = 0;
+
+/* === RESET === */
+function resetToIntro(){
+  state='intro';
+  idx=0; acc=0; last=0;
+  nextClick   = 1;
+  inPostPhase = false;
+  jiggleCount = 0;
+  wishUnlockTime   = 0;
+  wishWarningUntil = 0;
+  finalLoopUnlockTime = 0;
+  lastDrawn = null;
+}
+
+/* === ANA DÖNGÜ === */
+function start(){
+  requestAnimationFrame(tick);
+}
+
+function currentSeq(){
+  switch(state){
+    case 'intro':      return introSeq;
+    case 'loop':       return loopSeq;
+    case 'click1':     return c1Seq;
+    case 'click2':     return c2Seq;
+    case 'click3':     return c3Seq;
+    case 'jiggle':     return jigSeq;
+    case 'fall':       return fallSeq;
+    case 'loop2':      return loop2Seq;
+    case 'move':       return moveSeq;
+    case 'loop3':      return loop3Seq;
+    case 'loop4':      return loop4Seq;
+    case 'kick':       return kickSeq;
+    case 'cake':       return cakeSeq;
+    case 'wish':       return wishSeq;
+    case 'final':      return finalSeq;
+    case 'finalLoop':  return finalLoopSeq;
+    case 'finalScene': return finalSceneSeq;
+    case 'outro':      return outroSeq;
+  }
+}
+
+function currentTotal(){
+  switch(state){
+    case 'intro':      return INTRO_TOTAL;
+    case 'loop':       return LOOP_TOTAL;
+    case 'click1':     return CLICK1_TOTAL;
+    case 'click2':     return CLICK2_TOTAL;
+    case 'click3':     return CLICK3_TOTAL;
+    case 'jiggle':     return JIGGLE_TOTAL;
+    case 'fall':       return FALL_TOTAL;
+    case 'loop2':      return LOOP2_TOTAL;
+    case 'move':       return MOVE_TOTAL;
+    case 'loop3':      return LOOP3_TOTAL;
+    case 'loop4':      return LOOP4_TOTAL;
+    case 'kick':       return KICK_TOTAL;
+    case 'cake':       return CAKE_TOTAL;
+    case 'wish':       return WISH_TOTAL;
+    case 'final':      return FINAL_TOTAL;
+    case 'finalLoop':  return FINAL_LOOP_TOTAL;
+    case 'finalScene': return FINAL_SCENE_TOTAL;
+    case 'outro':      return OUTRO_TOTAL;
+  }
+}
+
+function currentStep(){
+  if(state==='intro')      return dtIntro;
+  if(state==='loop')       return dtLoop;
+  if(state==='loop2')      return dtLoop2;
+  if(state==='fall')       return dtFall;
+  if(state==='move')       return dtMove;
+  if(state==='loop3')      return dtLoop3;
+  if(state==='loop4')      return dtLoop4;
+  if(state==='kick')       return dtKick;
+  if(state==='cake')       return dtCake;
+  if(state==='wish')       return dtWish;
+  if(state==='final')      return dtFinal;
+  if(state==='finalLoop')  return dtFinalLoop;
+  if(state==='finalScene') return dtFinalScene;
+  if(state==='outro')      return dtOutro;
+  const total=currentTotal();
+  return 1000 / easeFps(idx,total);
+}
+
+function tick(t){
+  if(!assetsReady){
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  if(!last) last=t;
+  const dt=t-last; last=t; acc+=dt;
+
+  const step=currentStep();
+  while(acc>=step){
+    acc-=step;
+    idx++;
+    const total=currentTotal();
+
+    if(
+      state==='intro'   ||
+      state==='loop'    ||
+      state==='loop2'   ||
+      state==='loop3'   ||
+      state==='loop4'   ||
+      state==='wish'    ||
+      state==='finalLoop' ||
+      state==='outro'
+    ){
+      if(idx>=total) idx=0;
+    }
+    else if(state==='fall'){
+      if(idx>=total){
+        state='loop2';
+        idx=0;
+      }
+    }
+    else if(state==='move'){
+      if(idx>=total){
+        state='loop3';
+        idx=0;
+      }
+    }
+    else if(state==='kick'){
+      if(idx>=total){
+        state='loop4';
+        idx=0;
+      }
+    }
+    else if(state==='cake'){
+      if(idx>=total){
+        state='wish';
+        idx=0;
+        wishUnlockTime   = Date.now() + 12000;
+        wishWarningUntil = 0;
+      }
+    }
+    else if(state==='final'){
+      if(idx>=total){
+        state='finalLoop';
+        idx=0;
+        finalLoopUnlockTime = Date.now() + 10000;
+      }
+    }
+    else if(state==='finalScene'){
+      if(idx>=total){
+        state='outro';
+        idx=0;
+      }
+    }
+    else { // click1/2/3/jiggle
+      if(idx>=total){
+        state='loop';
+        idx=0;
+        if(!inPostPhase){
+          if(nextClick===1) nextClick=2;
+          else if(nextClick===2) nextClick=3;
+          else inPostPhase=true;
+        }
+      }
+    }
+  }
+
+  const seq=currentSeq();
+  const img=seq && seq.imgs[idx];
+  if(seq && img && seq.ready[idx]){
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(img,0,0,W,H);
+    lastDrawn=img;
+  }else if(lastDrawn){
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(lastDrawn,0,0,W,H);
+  }
+
+  if(state==='wish' && Date.now() < wishWarningUntil){
+    ctx.save();
+    ctx.font = '16pt sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 4;
+    const msg = 'Önce dileğini dile 😡🤬';
+    ctx.strokeText(msg, W/2, 40);
+    ctx.fillText(msg, W/2, 40);
+    ctx.restore();
+  }
+
+  requestAnimationFrame(tick);
+}
+
+/* === TIKLAMA === */
+canvas.addEventListener('click', e=>{
+  if(!assetsReady) return;
+
+  const r=canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / r.width;
+  const scaleY = canvas.height / r.height;
+  const x = (e.clientX - r.left) * scaleX;
+  const y = (e.clientY - r.top)  * scaleY;
+
+  if(state==='intro'){
+    if(pointInRect(x,y,INTRO_AREA)){
+      idx=0; acc=0; last=0;
+      state='loop';
+    }
+    return;
+  }
+
+  if(state==='loop'){
+    if(!pointInOval(x,y,AREA_LOOP)) return;
+    idx=0; acc=0; last=0;
+    if(!inPostPhase){
+      if(nextClick===1) state='click1';
+      else if(nextClick===2) state='click2';
+      else state='click3';
+    }else{
+      if(jiggleCount<3){
+        state='jiggle';
+        jiggleCount++;
+      }else{
+        state='fall';
+        jiggleCount=0;
+      }
+    }
+    return;
+  }
+
+  if(state==='loop2'){
+    if(pointInOval(x,y,AREA_LOOP2)){
+      idx=0; acc=0; last=0;
+      state='move';
+    }
+    return;
+  }
+
+  if(state==='loop3'){
+    if(pointInOval(x,y,AREA_LOOP3)){
+      idx=0; acc=0; last=0;
+      state='kick';
+    }
+    return;
+  }
+
+  if(state==='loop4'){
+    if(pointInRect(x,y,AREA_LOOP4)){
+      idx=0; acc=0; last=0;
+      state='cake';
+    }
+    return;
+  }
+
+  if(state==='wish'){
+    const now = Date.now();
+    if(now < wishUnlockTime){
+      wishWarningUntil = now + 2000;
+      return;
+    }
+    if(pointInRect(x,y,WISH_AREA)){
+      idx=0; acc=0; last=0;
+      state='final';
+    }
+    return;
+  }
+
+  if(state==='finalLoop'){
+    const now = Date.now();
+    if(now < finalLoopUnlockTime){
+      return;
+    }
+    if(pointInOval(x,y,FINAL_LOOP_AREA)){
+      idx=0; acc=0; last=0;
+      state='finalScene';
+    }
+    return;
+  }
+
+  if(state==='outro'){
+    if(pointInRect(x,y,OUTRO_MENU_AREA)){
+      window.location.href = "../index.html";
+      return;
+    }
+    if(pointInRect(x,y,OUTRO_AREA)){
+      resetToIntro();
+    }
+    return;
+  }
+});
+</script>
+</body>
+</html>

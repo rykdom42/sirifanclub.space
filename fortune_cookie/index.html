@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Fortune Cookie</title>
+
+<style>
+  *{
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  html,body{
+    height:100%;
+    margin:0;
+    background:#000;
+    overflow:hidden;
+    overscroll-behavior: none;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+
+  #wrap{
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    overflow:hidden;
+    background:#000;
+  }
+
+  canvas{
+    width:1920px;
+    height:1080px;
+    transform-origin: center center;
+    background:transparent;
+    display:block;
+    cursor:pointer;
+    touch-action: none;
+  }
+</style>
+</head>
+
+<body>
+<div id="wrap">
+  <canvas id="cv" width="1920" height="1080"></canvas>
+</div>
+
+<script>
+/* ============================
+   CACHE / ASSET VERSION
+   - Bunu artırdığın an herkes yeni PNG + yeni fortune.txt görür.
+============================ */
+const ASSET_VER = "2026-01-02-1";
+
+/* ============================
+   SCALE
+============================ */
+function resizeCanvas(){
+  const wrap = document.getElementById("wrap");
+  const canvas = document.getElementById("cv");
+  const scale = Math.min(
+    wrap.clientWidth  / 1920,
+    wrap.clientHeight / 1080
+  );
+  canvas.style.transform = `scale(${scale})`;
+}
+window.addEventListener("resize", resizeCanvas);
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", resizeCanvas);
+  window.visualViewport.addEventListener("scroll", resizeCanvas);
+}
+resizeCanvas();
+
+window.addEventListener("contextmenu", (e)=>e.preventDefault());
+window.addEventListener("dblclick", (e)=>e.preventDefault());
+
+/* ============================
+   CONSTANTS
+============================ */
+const W=1920, H=1080;
+const EXT='png';
+const PAD=5;
+const FPS=10;
+
+const TOTAL = {
+  intro:   10,
+  rope1:   39,
+  ropeloop:10,
+  rope2:   25,
+  boxloop: 10,
+  opening: 32,
+  loop2:   10,
+  left:    12,
+  mid:     12,
+  right:   15,
+  turns:   12,
+  loop3:   10,
+  crunch:  62,
+  final:   10
+};
+
+/* ============================
+   HITBOXES (image-space)
+============================ */
+const UI_RESTART_HIT = {
+  type: "circle",
+  cx: 1639.1836734693877,
+  cy: 86.93877551020407,
+  r: 44.89795918367349
+};
+
+// FINAL'de ana menüye dön (senin verdiğin)
+const UI_MENU_HIT = {
+  type: "rect",
+  x: 1753.469387755102,
+  y: 33.46938775510204,
+  w: 86.53061224489784,
+  h: 101.22448979591834
+};
+
+const HIT_INTRO = {
+  type: "ellipse",
+  cx: 970.204081632653,
+  cy: 374.2857142857142,
+  rx: 113.87755102040819,
+  ry: 73.87755102040816
+};
+
+const HIT_ROPELOOP = {
+  type: "ellipse",
+  cx: 970.204081632653,
+  cy: 374.2857142857142,
+  rx: 113.87755102040819,
+  ry: 73.87755102040816
+};
+
+const HIT_BOXLOOP = {
+  type: "ellipse",
+  cx: 964.0816326530612,
+  cy: 419.99999999999994,
+  rx: 290.6122448979591,
+  ry: 196.32653061224488
+};
+
+const HIT_LOOP2_LEFT = {
+  type: "circle",
+  cx: 665.7142857142857,
+  cy: 585.7142857142857,
+  r: 124.48979591836735
+};
+const HIT_LOOP2_MID = {
+  type: "circle",
+  cx: 969.3877551020407,
+  cy: 577.9591836734693,
+  r: 122.85714285714283
+};
+const HIT_LOOP2_RIGHT = {
+  type: "circle",
+  cx: 1266.9387755102039,
+  cy: 570.204081632653,
+  r: 123.67346938775506
+};
+
+const HIT_TURN_TRIGGER = {
+  type: "circle",
+  cx: 957.5510204081631,
+  cy: 577.1428571428571,
+  r: 165.71428571428572
+};
+
+const HIT_LOOP3_TRIGGER = {
+  type: "circle",
+  cx: 962.0408163265306,
+  cy: 593.4693877551019,
+  r: 157.9591836734694
+};
+
+const FINAL_TEXT_BOX = {
+  type: "rect",
+  x: 491.4285714285714,
+  y: 262.85714285714283,
+  w: 955.9183673469388,
+  h: 195.1020408163265
+};
+
+/* ============================
+   CANVAS
+============================ */
+const canvas = document.getElementById("cv");
+const ctx = canvas.getContext("2d");
+
+/* ============================
+   HELPERS
+============================ */
+function pad5(n){ return String(n).padStart(PAD,'0'); }
+
+function loadSeq(path,total){
+  return new Promise(resolve=>{
+    const imgs=new Array(total), ready=new Array(total).fill(false);
+    let loaded=0;
+    for(let i=1;i<=total;i++){
+      const img=new Image();
+      img.onload = ()=>{ ready[i-1]=true; if(++loaded===total) resolve({imgs,ready,total}); };
+      img.onerror= ()=>{ ready[i-1]=false; if(++loaded===total) resolve({imgs,ready,total}); };
+
+      // ✅ cache kır: aynı dosya adı kalsın ama URL değişsin
+      img.src = `${path}/frame_${pad5(i)}.${EXT}?v=${encodeURIComponent(ASSET_VER)}`;
+
+      imgs[i-1]=img;
+    }
+  });
+}
+
+function pointInRect(x,y,r){ return x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h; }
+function pointInCircle(x,y,c){ const dx=x-c.cx, dy=y-c.cy; return (dx*dx+dy*dy) <= c.r*c.r; }
+function pointInEllipse(x,y,e){
+  const dx=(x-e.cx)/(e.rx+1e-9);
+  const dy=(y-e.cy)/(e.ry+1e-9);
+  return dx*dx+dy*dy <= 1;
+}
+function hitTest(x,y,h){
+  if(!h) return false;
+  if(h.type==="rect") return pointInRect(x,y,h);
+  if(h.type==="circle") return pointInCircle(x,y,h);
+  if(h.type==="ellipse") return pointInEllipse(x,y,h);
+  return false;
+}
+
+function getScaledClickXY(e){
+  const r = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / r.width;
+  const scaleY = canvas.height / r.height;
+  const x = (e.clientX - r.left) * scaleX;
+  const y = (e.clientY - r.top)  * scaleY;
+  return {x,y};
+}
+
+/* ============================
+   FORTUNE (Shuffle Bag: tekrarsız çeşitlilik)
+============================ */
+let fortunes = [];
+let currentFortune = "";
+
+// metin fit ayarları
+const BASE_FONT_PX = 44;
+const MIN_FONT_PX  = 18;
+const MAX_LINES    = 2;
+
+// Bag state (session boyunca çeşitlilik)
+const BAG_KEY = "fc_bag_v1";
+const BAG_POS_KEY = "fc_bag_pos_v1";
+
+function shuffleInPlace(arr){
+  for(let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+function loadBag(){
+  try{
+    const bag = JSON.parse(sessionStorage.getItem(BAG_KEY) || "null");
+    const pos = parseInt(sessionStorage.getItem(BAG_POS_KEY) || "0", 10);
+    if(Array.isArray(bag) && bag.length > 0 && Number.isFinite(pos)){
+      return { bag, pos };
+    }
+  }catch(_){}
+  return { bag: [], pos: 0 };
+}
+function saveBag(bag, pos){
+  try{
+    sessionStorage.setItem(BAG_KEY, JSON.stringify(bag));
+    sessionStorage.setItem(BAG_POS_KEY, String(pos));
+  }catch(_){}
+}
+function rebuildBag(){
+  const bag = shuffleInPlace([...fortunes]);
+  const pos = 0;
+  saveBag(bag, pos);
+  return { bag, pos };
+}
+
+async function loadFortunes(){
+  try{
+    const url = new URL("./fortune.txt", window.location.href);
+    // ✅ fortune.txt cache kır
+    url.searchParams.set("v", ASSET_VER);
+
+    const res = await fetch(url.toString(), { cache:"no-store" });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const txt = await res.text();
+    fortunes = txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    if(fortunes.length===0) fortunes = ["(fortune.txt boş)"];
+  }catch(err){
+    fortunes = ["(fortune.txt missing)"];
+  }
+}
+
+function pickFortune(){
+  if(!fortunes || fortunes.length === 0) return "(no fortune)";
+
+  let { bag, pos } = loadBag();
+
+  // fortune.txt değiştiyse (satır sayısı farkı) bag yenile
+  if(!bag || bag.length !== fortunes.length){
+    ({ bag, pos } = rebuildBag());
+  }
+
+  if(pos >= bag.length){
+    ({ bag, pos } = rebuildBag());
+  }
+
+  const chosen = bag[pos];
+  pos++;
+  saveBag(bag, pos);
+  return chosen;
+}
+
+function wrapWords(ctx, text, maxW){
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for(const w of words){
+    const test = line ? (line+" "+w) : w;
+    if(ctx.measureText(test).width <= maxW){
+      line = test;
+    }else{
+      if(line) lines.push(line);
+      if(ctx.measureText(w).width > maxW){
+        let cur="";
+        for(const ch of w){
+          const t = cur + ch;
+          if(ctx.measureText(t).width <= maxW) cur = t;
+          else { if(cur) lines.push(cur); cur = ch; }
+        }
+        if(cur) lines.push(cur);
+        line = "";
+      }else{
+        line = w;
+      }
+    }
+  }
+  if(line) lines.push(line);
+  return lines;
+}
+
+function fitTextToBox(ctx, text, boxW, boxH){
+  const pad = Math.max(10, Math.floor(Math.min(boxW, boxH)*0.06));
+  const maxW = Math.max(10, boxW - pad*2);
+  const maxH = Math.max(10, boxH - pad*2);
+
+  function works(size){
+    ctx.font = `${size}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+    const lineH = Math.floor(size * 1.25);
+    const lines = wrapWords(ctx, text, maxW);
+    if(lines.length > MAX_LINES) return null;
+    if(lines.length * lineH > maxH) return null;
+    return { size, lines, pad, lineH };
+  }
+
+  let r = works(BASE_FONT_PX);
+  if(r) return r;
+
+  for(let s=BASE_FONT_PX-1; s>=MIN_FONT_PX; s--){
+    r = works(s);
+    if(r) return r;
+  }
+
+  const size = MIN_FONT_PX;
+  ctx.font = `${size}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+  const lineH = Math.floor(size * 1.25);
+  const lines = wrapWords(ctx, text, maxW);
+  return { size, lines, pad, lineH };
+}
+
+function drawFinalFortune(){
+  if(!currentFortune) return;
+
+  const bx = FINAL_TEXT_BOX.x;
+  const by = FINAL_TEXT_BOX.y;
+  const bw = FINAL_TEXT_BOX.w;
+  const bh = FINAL_TEXT_BOX.h;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bx,by,bw,bh);
+  ctx.clip();
+
+  const rFit = fitTextToBox(ctx, currentFortune, bw, bh);
+  ctx.font = `${rFit.size}px system-ui,-apple-system,Segoe UI,Roboto,Arial`;
+  ctx.textBaseline = "top";
+
+  const pad = rFit.pad;
+  const maxW = bw - pad*2;
+
+  const totalH = rFit.lines.length * rFit.lineH;
+  const innerH = bh - pad*2;
+  const ty = by + pad + Math.floor(Math.max(0,(innerH-totalH)/2));
+
+  ctx.shadowColor="rgba(0,0,0,0.70)";
+  ctx.shadowBlur=8;
+  ctx.shadowOffsetX=0;
+  ctx.shadowOffsetY=3;
+
+  ctx.lineWidth = Math.max(3, Math.floor(rFit.size*0.12));
+  ctx.strokeStyle = "rgba(0,0,0,0.85)";
+  ctx.fillStyle   = "rgba(255,255,255,0.96)";
+
+  for(let i=0;i<rFit.lines.length;i++){
+    const line = rFit.lines[i];
+    const mw = ctx.measureText(line).width;
+    const tx = bx + pad + Math.floor((maxW - mw)/2);
+    const y  = ty + i*rFit.lineH;
+    ctx.strokeText(line, tx, y);
+    ctx.fillText(line, tx, y);
+  }
+
+  ctx.restore();
+}
+
+/* ============================
+   LOAD SEQUENCES
+============================ */
+let seq = {};
+
+(async function boot(){
+  await loadFortunes();
+
+  const loads = [
+    loadSeq('frames/fcookie_intro',     TOTAL.intro),
+    loadSeq('frames/fcookie_rope1',     TOTAL.rope1),
+    loadSeq('frames/fcookie_ropeloop',  TOTAL.ropeloop),
+    loadSeq('frames/fcookie_rope2',     TOTAL.rope2),
+    loadSeq('frames/fcookie_boxloop',   TOTAL.boxloop),
+    loadSeq('frames/fcookie_opening',   TOTAL.opening),
+    loadSeq('frames/fcookie_loop2',     TOTAL.loop2),
+    loadSeq('frames/fcookie_left',      TOTAL.left),
+    loadSeq('frames/fcookie_mid',       TOTAL.mid),
+    loadSeq('frames/fcookie_right',     TOTAL.right),
+    loadSeq('frames/fcookie_turns',     TOTAL.turns),
+    loadSeq('frames/fcookie_loop3',     TOTAL.loop3),
+    loadSeq('frames/fcookie_crunch',    TOTAL.crunch),
+    loadSeq('frames/fcookie_final',     TOTAL.final),
+  ];
+
+  const [
+    intro, rope1, ropeloop, rope2, boxloop, opening, loop2,
+    left, mid, right, turns, loop3, crunch, final
+  ] = await Promise.all(loads);
+
+  seq.intro   = intro;
+  seq.rope1   = rope1;
+  seq.ropeloop= ropeloop;
+  seq.rope2   = rope2;
+  seq.boxloop = boxloop;
+  seq.opening = opening;
+  seq.loop2   = loop2;
+  seq.left    = left;
+  seq.mid     = mid;
+  seq.right   = right;
+  seq.turns   = turns;
+  seq.loop3   = loop3;
+  seq.crunch  = crunch;
+  seq.final   = final;
+
+  resetAll(true);
+  start();
+})();
+
+/* ============================
+   STATE MACHINE
+============================ */
+let state = 'intro';
+let idx = 0;
+let last = 0;
+let acc = 0;
+const STEP = 1000 / FPS;
+
+let lastDrawn = null;
+
+function resetAll(pickNewFortune){
+  state = 'intro';
+  idx = 0;
+  last = 0;
+  acc = 0;
+  lastDrawn = null;
+
+  if(pickNewFortune){
+    currentFortune = pickFortune();
+  }
+}
+
+function setState(s){
+  state = s;
+  idx = 0;
+  acc = 0;
+  last = 0;
+  lastDrawn = null;
+}
+
+function isLoopState(s){
+  return (
+    s === 'intro' ||
+    s === 'ropeloop' ||
+    s === 'boxloop' ||
+    s === 'loop2' ||
+    s === 'loop3' ||
+    s === 'final'
+  );
+}
+
+function currentSeq(){ return seq[state]; }
+function currentTotal(){ return TOTAL[state]; }
+
+function advanceFrames(){
+  idx++;
+  const total = currentTotal();
+  if(isLoopState(state)){
+    if(idx >= total) idx = 0;
+  }else{
+    if(idx >= total) idx = total - 1;
+  }
+}
+
+function handleAutoTransitions(){
+  const total = currentTotal();
+  const isAtEnd = (idx === total - 1);
+  if(!isAtEnd) return;
+
+  if(state === 'rope1'){ setState('ropeloop'); return; }
+  if(state === 'rope2'){ setState('boxloop'); return; }
+  if(state === 'opening'){ setState('loop2'); return; }
+  if(state === 'turns'){ setState('loop3'); return; }
+  if(state === 'crunch'){ setState('final'); return; }
+}
+
+/* ============================
+   RENDER
+============================ */
+function draw(){
+  const s = currentSeq();
+  if(!s) return;
+
+  const img = s.imgs[idx];
+  if(s && img && s.ready[idx]){
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(img,0,0,W,H);
+    lastDrawn = img;
+
+    if(state === 'final'){
+      drawFinalFortune();
+    }
+  }else if(lastDrawn){
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(lastDrawn,0,0,W,H);
+
+    if(state === 'final'){
+      drawFinalFortune();
+    }
+  }
+}
+
+/* ============================
+   LOOP
+============================ */
+function start(){
+  requestAnimationFrame(tick);
+}
+
+function tick(t){
+  if(!last) last = t;
+  const dt = t - last;
+  last = t;
+  acc += dt;
+
+  while(acc >= STEP){
+    acc -= STEP;
+    advanceFrames();
+    handleAutoTransitions();
+  }
+
+  draw();
+  requestAnimationFrame(tick);
+}
+
+/* ============================
+   CLICK / POINTER LOGIC (1-CLICK)
+============================ */
+function goMenu(){
+  window.location.href = "../index.html";
+}
+
+canvas.addEventListener('pointerdown', (e)=>{
+  e.preventDefault();
+  if(!seq.intro) return;
+
+  const {x,y} = getScaledClickXY(e);
+
+  // FINAL: menüye dön
+  if(state === 'final' && hitTest(x,y,UI_MENU_HIT)){
+    goMenu();
+    return;
+  }
+
+  // GLOBAL: restart
+  if(hitTest(x,y,UI_RESTART_HIT)){
+    resetAll(true);
+    return;
+  }
+
+  // intro -> rope1 (1 click)
+  if(state === 'intro'){
+    if(hitTest(x,y,HIT_INTRO)){
+      setState('rope1');
+    }
+    return;
+  }
+
+  // ropeloop -> rope2 (1 click)
+  if(state === 'ropeloop'){
+    if(hitTest(x,y,HIT_ROPELOOP)){
+      setState('rope2');
+    }
+    return;
+  }
+
+  // boxloop -> opening (1 click)
+  if(state === 'boxloop'){
+    if(hitTest(x,y,HIT_BOXLOOP)){
+      setState('opening');
+    }
+    return;
+  }
+
+  // loop2 -> left/mid/right (1 click)
+  if(state === 'loop2'){
+    if(hitTest(x,y,HIT_LOOP2_LEFT)){ setState('left'); return; }
+    if(hitTest(x,y,HIT_LOOP2_MID)){  setState('mid');  return; }
+    if(hitTest(x,y,HIT_LOOP2_RIGHT)){setState('right');return; }
+    return;
+  }
+
+  // left/mid/right: SAHNE BİTİNCE 1 click -> turns
+  if(state === 'left' || state === 'mid' || state === 'right'){
+    const total = currentTotal();
+    const isAtEnd = (idx === total - 1);
+    if(!isAtEnd) return;
+
+    if(hitTest(x,y,HIT_TURN_TRIGGER)){
+      setState('turns');
+    }
+    return;
+  }
+
+  // loop3: 1 click -> crunch
+  if(state === 'loop3'){
+    if(hitTest(x,y,HIT_LOOP3_TRIGGER)){
+      setState('crunch');
+    }
+    return;
+  }
+
+  // rope1/rope2/opening/turns/crunch/final sırasında ekstra click yok
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>sirifanclub.space</title>
+
+  <style>
+    *{
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      background:#000;
+      overflow:hidden;
+      overscroll-behavior:none;
+      -webkit-user-select:none;
+      user-select:none;
+    }
+    #wrap{
+      position:relative;
+      width:100vw;
+      height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      background:#000;
+    }
+    canvas{
+      width:1920px;
+      height:1080px;
+      transform-origin:center center;
+      display:block;
+      background:transparent;
+      cursor:pointer;
+      touch-action:none;
+    }
+
+    /* ===== PAROLA OVERLAY ===== */
+    #gate{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.92);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:100;
+    }
+    #gatePanel{
+      background:#111;
+      border:1px solid #444;
+      border-radius:12px;
+      padding:24px 32px;
+      color:#fff;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      min-width:280px;
+      max-width:90vw;
+      text-align:center;
+      box-shadow:0 0 24px rgba(0,0,0,0.75);
+    }
+    #gatePanel h1{
+      margin:0 0 12px;
+      font-size:18px;
+      font-weight:700;
+    }
+    #gatePanel p{
+      margin:0 0 16px;
+      font-size:13px;
+      color:#ccc;
+    }
+    #pwInput{
+      width:100%;
+      padding:8px 10px;
+      border-radius:6px;
+      border:1px solid #555;
+      background:#000;
+      color:#fff;
+      font-size:14px;
+      margin-bottom:10px;
+      box-sizing:border-box;
+    }
+    #pwButton{
+      padding:7px 16px;
+      border-radius:6px;
+      border:none;
+      background:#0f7;
+      color:#000;
+      font-weight:700;
+      cursor:pointer;
+      font-size:14px;
+    }
+    #pwButton:hover{ background:#0fa; }
+    #pwError{
+      margin-top:8px;
+      font-size:12px;
+      color:#f55;
+      min-height:16px;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- PAROLA -->
+  <div id="gate">
+    <div id="gatePanel">
+      <h1>Giriş Parolası</h1>
+      <p>Devam etmek için parolayı gir.</p>
+      <input id="pwInput" type="password" placeholder="Parola" autocomplete="off" />
+      <button id="pwButton">Giriş</button>
+      <div id="pwError"></div>
+    </div>
+  </div>
+
+  <!-- CANVAS -->
+  <div id="wrap">
+    <canvas id="cv" width="1920" height="1080"></canvas>
+  </div>
+
+<script>
+
+const ASSET_VER = "2026-01-02-1";
+
+
+/* ============================
+   SCALE
+============================ */
+function resizeCanvas(){
+  const wrap = document.getElementById("wrap");
+  const canvas = document.getElementById("cv");
+  const scale = Math.min(wrap.clientWidth/1920, wrap.clientHeight/1080);
+  canvas.style.transform = `scale(${scale})`;
+}
+window.addEventListener("resize", resizeCanvas);
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize", resizeCanvas);
+  window.visualViewport.addEventListener("scroll", resizeCanvas);
+}
+resizeCanvas();
+
+window.addEventListener("contextmenu", e => e.preventDefault());
+window.addEventListener("dblclick", e => e.preventDefault());
+
+/* ============================
+   PAROLA (Sadece ilk girişte)
+============================ */
+const PASSWORD = "14112006";
+const SESSION_KEY = "sfc_unlocked_v1"; // gerekirse versiyon yükseltirsin
+const gate = document.getElementById("gate");
+const pwInput = document.getElementById("pwInput");
+const pwButton = document.getElementById("pwButton");
+const pwError = document.getElementById("pwError");
+
+let isUnlocked = false;
+
+function unlock(){
+  isUnlocked = true;
+  try{ sessionStorage.setItem(SESSION_KEY, "1"); }catch(_){}
+  pwError.textContent = "";
+  gate.style.display = "none";
+  pwInput.value = "";
+}
+
+function lock(){
+  isUnlocked = false;
+  try{ sessionStorage.removeItem(SESSION_KEY); }catch(_){}
+  gate.style.display = "flex";
+}
+
+function handlePassword(){
+  const val = (pwInput.value || "").trim();
+  if(val === PASSWORD){
+    unlock();
+  }else{
+    pwError.textContent = "Yanlış parola, tekrar dene.";
+  }
+}
+
+// Sayfa her yüklendiğinde: daha önce açıldıysa parola sorma
+try{
+  if(sessionStorage.getItem(SESSION_KEY) === "1"){
+    unlock();
+  }else{
+    gate.style.display = "flex";
+    pwInput.focus({preventScroll:true});
+  }
+}catch(_){
+  gate.style.display = "flex";
+  pwInput.focus({preventScroll:true});
+}
+
+pwButton.addEventListener("click", handlePassword);
+pwInput.addEventListener("keydown", (e)=>{ if(e.key==="Enter") handlePassword(); });
+
+/* ============================
+   MENU ANIMATION
+============================ */
+const W=1920, H=1080;
+const FPS = 10;
+const TOTAL = 10;
+const EXT = "png";
+const PAD = 5;
+const MENU_PATH = "frames/main_menu";
+
+const canvas = document.getElementById("cv");
+const ctx = canvas.getContext("2d");
+
+function pad5(n){ return String(n).padStart(PAD,"0"); }
+
+function loadSeq(path,total){
+  return new Promise(resolve=>{
+    const imgs = new Array(total);
+    const ready= new Array(total).fill(false);
+    let loaded = 0;
+
+    for(let i=1;i<=total;i++){
+      const img = new Image();
+      img.onload = ()=>{ ready[i-1]=true; if(++loaded===total) resolve({imgs,ready,total}); };
+      img.onerror = ()=>{ ready[i-1]=false; if(++loaded===total) resolve({imgs,ready,total}); };
+      img.src = `${path}/frame_${pad5(i)}.${EXT}`;
+      imgs[i-1]=img;
+    }
+  });
+}
+
+/* ============================
+   HITBOXES
+============================ */
+const HIT_BDAY = {
+  type: "rect",
+  x: 665.3061224489796,
+  y: 351.83673469387753,
+  w: 596.734693877551,
+  h: 87.34693877551024
+};
+
+const HIT_FORTUNE = {
+  type: "rect",
+  x: 704.4897959183673,
+  y: 501.2244897959184,
+  w: 506.9387755102042,
+  h: 94.69387755102042
+};
+
+function pointInRect(x,y,r){
+  return x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h;
+}
+
+function getScaledClickXY(e){
+  const r = canvas.getBoundingClientRect();
+  const scaleX = canvas.width  / r.width;
+  const scaleY = canvas.height / r.height;
+  const x = (e.clientX - r.left) * scaleX;
+  const y = (e.clientY - r.top)  * scaleY;
+  return {x,y};
+}
+
+function goTo(path){
+  window.location.href = path;
+}
+
+/* render loop */
+let menuSeq = null;
+let idx = 0;
+let last = 0;
+let acc = 0;
+const STEP = 1000/FPS;
+let lastDrawn = null;
+
+function start(){
+  requestAnimationFrame(tick);
+}
+
+function tick(t){
+  if(!menuSeq || !isUnlocked){
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  if(!last) last = t;
+  const dt = t - last;
+  last = t;
+  acc += dt;
+
+  while(acc >= STEP){
+    acc -= STEP;
+    idx++;
+    if(idx >= TOTAL) idx = 0;
+  }
+
+  const img = menuSeq.imgs[idx];
+  if(menuSeq.ready[idx] && img){
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(img,0,0,W,H);
+    lastDrawn = img;
+  }else if(lastDrawn){
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(lastDrawn,0,0,W,H);
+  }
+
+  requestAnimationFrame(tick);
+}
+
+/* pointer handling */
+canvas.addEventListener("pointerdown", (e)=>{
+  e.preventDefault();
+  if(!isUnlocked || !menuSeq) return;
+
+  const {x,y} = getScaledClickXY(e);
+
+  if(pointInRect(x,y,HIT_BDAY)){
+    goTo("./bday_2025/");
+    return;
+  }
+  if(pointInRect(x,y,HIT_FORTUNE)){
+    goTo("./fortune_cookie/");
+    return;
+  }
+});
+
+loadSeq(MENU_PATH, TOTAL).then(seq=>{
+  menuSeq = seq;
+  const anyLoaded = seq.ready.some(Boolean);
+  if(!anyLoaded){
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = "#fff";
+    ctx.font = "24px system-ui,Segoe UI,Arial";
+    ctx.fillText("Menu frames bulunamadı. Path/dosya isimlerini kontrol et.", 60, 80);
+    ctx.fillText(`Beklenen örnek: ${MENU_PATH}/frame_00001.${EXT}`, 60, 120);
+    return;
+  }
+  start();
+});
+</script>
+</body>
+</html>
